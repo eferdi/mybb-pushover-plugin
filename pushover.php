@@ -37,7 +37,7 @@ function pushover_info()
 		'author'		=> 'eferdi',
 		'authorsite'	=> 'http://it-marx.de',
 		'version'		=> '0.10',
-		'compatibility'	=> '18*',
+		'compatibility'	=> '16*',
 		'codename'		=> 'pushover'
 	);
 }
