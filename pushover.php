@@ -13,165 +13,147 @@ if(!defined('IN_MYBB'))
 {
 	die('This file cannot be accessed directly.');
 }
-	
-$plugins->add_hook('datahandler_post_insert_thread', 'send_new_thread_notification');
-$plugins->add_hook('datahandler_post_insert_post', 'send_new_reply_notification');
+
+$plugins->add_hook('newthread_do_newthread_end', 'pushover_send_new_thread_notification');
+$plugins->add_hook('datahandler_post_insert_post_end', 'pushover_send_new_reply_notification');
 
 function pushover_info()
 {
-	/**
-	 * Array of information about the plugin.
-	 * name: The name of the plugin
-	 * description: Description of what the plugin does
-	 * website: The website the plugin is maintained at (Optional)
-	 * author: The name of the author of the plugin
-	 * authorsite: The URL to the website of the author (Optional)
-	 * version: The version number of the plugin
-	 * compatibility: A CSV list of MyBB versions supported. Ex, '121,123', '12*'. Wildcards supported.
-	 * codename: An unique code name to be used by updated from the official MyBB Mods community.
-	 */
 	return array(
-		'name'			=> 'Pushover Notifications',
-		'description'	=> 'Sends informations about new posts to users with the help of Pushover.net',
-		'website'		=> 'http://it-marx.de',
-		'author'		=> 'eferdi',
-		'authorsite'	=> 'http://it-marx.de',
-		'version'		=> '0.10',
-		'compatibility'	=> '16*',
-		'codename'		=> 'pushover'
+		'name' => 'Pushover Notifications',
+		'description' => 'Sends informations about new posts to users with the help of Puschover',
+		'website' => 'https://github.com/fvjuzmu/mybb-pushover-plugin',
+		'author' => 'soulflyman',
+		'authorsite' => 'https://github.com/soulflyman',
+		'version' => '1.0',
+		'compatibility' => '18*',
+		'codename' => 'pushover'
 	);
 }
 
-function send_new_thread_notification()
+function pushover_send_new_thread_notification()
 {
-	send_notifications(true);
-	//sendDebug('newThreadHook');
+	try
+	{
+		if(pushover_is_forum_blacklisted())
+		{
+			return;
+		}
+
+		$userName = $GLOBALS['new_thread']['username'];
+		$parentID = $GLOBALS['forum']['pid'];
+		$parentName = $GLOBALS['forum_cache'][$parentID]['name'];
+		$threadID = $GLOBALS['thread_info']['tid'];
+		$postSubject = $GLOBALS['new_thread']['subject'];
+
+		$msgUrl = $GLOBALS['settings']['bburl'] . '/showthread.php?tid=' .$threadID . '&action=newpost';
+		$msg = $userName . " hat dieses neue Thema in <i>" . $parentName . "</i> erstellt.";
+
+		pushover_send_notifications($postSubject, $msg, $msgUrl);
+	}
+	catch(Exception $e)
+	{
+	}
 }
 
-function send_new_reply_notification()
+function pushover_send_new_reply_notification()
 {
-	send_notifications(false);
-	//sendDebug('newPostHook');
+	try
+	{
+		if($GLOBALS['post']['savedraft'] == 1 || pushover_is_forum_blacklisted())
+		{
+			return;
+		}
+
+		$userName = $GLOBALS['post']['username'];
+		$forumName = $GLOBALS['forum']['name'];
+		$parentID = $GLOBALS['forum']['pid'];
+		$parentName = $GLOBALS['forum_cache'][$parentID]['name'];
+		$threadID = $GLOBALS['post']['tid'];
+		$postSubject = $GLOBALS['post']['subject'];
+
+		$msgUrl = $GLOBALS['settings']['bburl'] . '/showthread.php?tid=' .$threadID . '&action=newpost';
+		$msg = $userName . " hat auf ein Thema in <i>" . $parentName . "->" . $forumName . "</i> geantwortet.";
+
+		pushover_send_notifications($postSubject, $msg, $msgUrl);
+	}
+	catch(Exception $e)
+	{
+	}
 }
 
-function sendDebug($message)
+function pushover_is_forum_blacklisted()
 {
-	send_pushover_notification_to_user_by_key('ujkGtmTupCGqWgfQFZXPtKDcmxKeA3', 'Plugin DEBUG', $message, '');
+	$blacklist = explode(',', $GLOBALS['settings']['pushover_blacklist']);
+
+	if(!in_array($GLOBALS['forum']['pid'], $blacklist) && !in_array($GLOBALS['forum']['fid'], $blacklist))
+	{
+		return false;
+	}
+
+	return true;
 }
 
-function send_notifications($newThread)
+function pushover_send_notifications($msgTitle, $msg, $msgUrl)
 {
-	global $mybb, $db, $post, $cache, $maintimer;
-	$forumName = $cache->cache['forums'][$post['fid']]['name'];
-	$parentForumIDs = $cache->cache['forums'][$post['fid']]['parentlist'];
-	
+	global $db;
+
+	$fid = "fid" . $GLOBALS['settings']['pushover_fid'];
+
 	$date = new DateTime();
 	$postTime = $date->getTimestamp();
-	
-	if(!empty($parentForumIDs))
-	{
-		$parentForumID = explode(',', $parentForumIDs);
-		$forumName = $cache->cache['forums'][$parentForumID[0]]['name'] . '->' . $forumName;
-	}
-	
-	$pushoverTitel = $post['subject'];
-	if($newThread == true)
-	{
-		$pushoverMessage = $mybb->user['username'] . ' hat ein neues Thema in <i>' . $forumName . '</i> erstellt.';
-	}
-	else
-	{
-		$pushoverMessage = $mybb->user['username'] . ' hat auf ein Thema in <i>' . $forumName . '</i> geantwortet.';
-	}
-	
-	$pushoverUrl = $mybb->settings['bburl']  . '/showthread.php?tid=' . $post['tid'] . '&action=newpost'; 
-	
-	//get plugin settings
-	
-	//if special forum then get only usersers of the special group
-	//else
-	//get all users
-	$queryUserKeys = $db->simple_select("userfields", "ufid, fid6", "fid6 is not null", array(
+
+	// GET pushover IDs of alle users that are not banned
+	$queryUserKeys = $db->simple_select("userfields", "ufid, " . $fid, $fid . " is not NULL and " . $fid . " != '' and ufid not in (select uid from " . $db->table_prefix . "banned where lifted = 0)", array(
 		"order_by" => 'ufid',
 		"order_dir" => 'DESC'
 	));
-	 
-	while($userKeyTemp = $db->fetch_array($queryUserKeys))
+
+	//send notification to every user except the user which posted
+	while($userKey = $db->fetch_array($queryUserKeys))
 	{
-		$userKeys[] = $userKeyTemp;
-	}
-	
-	$queryBannedUsers = $db->simple_select("banned", "uid", "uid is not null", array(
-		"order_by" => 'uid',
-		"order_dir" => 'DESC'
-	));
-	
-	while($bannedUserTemp = $db->fetch_array($queryBannedUsers))
-	{
-		$bannedUsers[] = $bannedUserTemp;
-	}
-	
-	if(!empty($userKeys))
-	{
-		foreach($userKeys as $userKey)
+		if($userKey['ufid'] == $GLOBALS['uid'])
 		{
-			if($userKey['ufid'] == $mybb->user['uid'])
-			{
-				continue;
-			}
-			
-			if(!empty($bannedUsers))
-			{
-				foreach($bannedUsers as $bannedUser)
-				{
-				
-					if($bannedUser['uid'] == $userKey['ufid'])
-					{
-						continue;
-					}
-				}
-			}
-			
-			send_pushover_notification_to_user_by_key($userKey['fid6'], $pushoverTitel, $pushoverMessage, $pushoverUrl, $postTime);
-		}	
+			continue;
+		}
+
+		send_pushover_notification_to_user_by_key($userKey[$fid], $msgTitle, $msg, $msgUrl, $postTime);
 	}
-	//get all banned users
-	
-    if($mybb->usergroup['cancp'] == 1)
-    {
-        // Admin only
-    }
-    else
-    {
-        // Everyone else
-    }
 }
 
-function send_pushover_notification_to_user_by_key($userKey, $pushoverTitel, $pushoverMessage, $pushoverUrl, $postTime)
+function send_pushover_notification_to_user_by_key($userKey, $pushoverTitle, $pushoverMessage, $pushoverUrl, $postTime)
 {
-	ob_start();
+    ob_start();
 	curl_setopt_array($ch = curl_init(), array(
-	  CURLOPT_HEADER => false,
-	  CURLOPT_URL => "https://api.pushover.net/1/messages.json",
-	  CURLOPT_SSL_VERIFYPEER => false,
-	  CURLOPT_VERBOSE => false,
-	  CURLOPT_RETURNTRANSFER => false,
-	  CURLOPT_POSTFIELDS => array(
-		"token" => "",
-		"user" => $userKey,
-		"title" => $pushoverTitel,
-		"message" => $pushoverMessage,
-		"url_title" => "Beitrag lesen",
-		"url" => $pushoverUrl,
-		"html" => 1,
-		"timestamp" => $postTime
-	  ),
-	  CURLOPT_SAFE_UPLOAD => true,
+		CURLOPT_HEADER => false,
+		CURLOPT_URL => "https://api.pushover.net/1/messages.json",
+		CURLOPT_SSL_VERIFYPEER => false,
+		CURLOPT_VERBOSE => false,
+		CURLOPT_RETURNTRANSFER => false,
+		CURLOPT_POSTFIELDS => array(
+			"token" => $GLOBALS['settings']['pushover_token'],
+			"user" => $userKey,
+			"title" => $pushoverTitle,
+			"message" => $pushoverMessage,
+			"url_title" => "Beitrag lesen",
+			"url" => $pushoverUrl,
+			"html" => 1,
+			"timestamp" => $postTime
+		),
+		CURLOPT_SAFE_UPLOAD => true
+
+		/*/CURLOPT_POST => true,
+		CURLOPT_USERAGENT => 'api',
+		CURLOPT_TIMEOUT => 1,
+		CURLOPT_FORBID_REUSE => true,
+		CURLOPT_CONNECTTIMEOUT => 1,
+		CURLOPT_DNS_CACHE_TIMEOUT => 10,
+		CURLOPT_FRESH_CONNECT => true//*/
 	));
+
 	curl_exec($ch);
 	curl_close($ch);
-	//*/
-	ob_end_clean();
+    ob_end_clean();
 }
 
 /*
@@ -182,7 +164,7 @@ function send_pushover_notification_to_user_by_key($userKey, $pushoverTitel, $pu
 */
 function pushover_install()
 {
-	global $db, $mybb;
+	global $db;
 
 	$setting_group = array(
 		'name' => 'pushover_settings',
@@ -193,28 +175,32 @@ function pushover_install()
 	);
 
 	$gid = $db->insert_query("settinggroups", $setting_group);
-	
-	
+
 	$setting_array = array(
-    'pushover_special_forums' => array(
-        'title' => 'Pushover Special Forums',
-        'description' => 'Define a list of Special Forums. Pushover notifications about new posts in these Forums will only send to the below selected group.',
-        'optionscode' => 'forumselect',
-        'disporder' => 1
-    ),
-    'pushover_special_group' => array(
-        'title' => 'Pushover Special Group',
-        'description' => 'Only these Groups will receive Pushover notifications for the above Forums.',
-        'optionscode' => "groupselect",
-        'disporder' => 2
-    ),
+		'pushover_token' => array(
+			'title' => 'Pushover API Token',
+			'description' => 'Your Pushover API Token',
+			'optionscode' => 'text',
+			'disporder' => 1
+		),
+		'pushover_fid' => array(
+			'title' => 'Custom Profile Field ID',
+			'description' => 'The ID of the "Custom Profile Field" in which the users can enter there Pushover-ID',
+			'optionscode' => 'text',
+			'disporder' => 3
+		),
+		'pushover_blacklist' => array(
+			'title' => 'Forum Blacklist',
+			'description' => 'A Blacklist of Forum-IDs seperated by comma. All listet forums do not send a notification.',
+			'optionscode' => 'text',
+			'disporder' => 4
+		)
 	);
 
 	foreach($setting_array as $name => $setting)
 	{
 		$setting['name'] = $name;
 		$setting['gid'] = $gid;
-
 		$db->insert_query('settings', $setting);
 	}
 
@@ -230,7 +216,18 @@ function pushover_install()
 */
 function pushover_is_installed()
 {
-	return true;		
+	global $mybb;
+
+	if( array_key_exists('pushover_token', $mybb->settings) &&
+		array_key_exists('pushover_blacklist', $mybb->settings) &&
+		array_key_exists('pushover_fid', $mybb->settings) )
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
 }
 
 /*
@@ -242,7 +239,7 @@ function pushover_uninstall()
 {
 	global $db;
 
-	$db->delete_query('settings', "name IN ('pushover_special_forums','pushover_special_group')");
+	$db->delete_query('settings', "name IN ('pushover_token','pushover_blacklist','pushover_fid')");
 	$db->delete_query('settinggroups', "name = 'pushover_settings'");
 
 	// Don't forget this
