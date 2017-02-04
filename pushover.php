@@ -129,7 +129,7 @@ function send_pushover_notification_to_user_by_key($userKey, $pushoverTitle, $pu
 		CURLOPT_URL => "https://api.pushover.net/1/messages.json",
 		CURLOPT_SSL_VERIFYPEER => false,
 		CURLOPT_VERBOSE => false,
-		CURLOPT_RETURNTRANSFER => false,
+		CURLOPT_RETURNTRANSFER => true,
 		CURLOPT_POSTFIELDS => array(
 			"token" => $GLOBALS['settings']['pushover_token'],
 			"user" => $userKey,
