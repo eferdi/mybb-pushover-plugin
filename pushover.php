@@ -25,7 +25,7 @@ function pushover_info()
 		'website' => 'https://github.com/fvjuzmu/mybb-pushover-plugin',
 		'author' => 'soulflyman',
 		'authorsite' => 'https://github.com/soulflyman',
-		'version' => '1.0',
+		'version' => '1.1',
 		'compatibility' => '18*',
 		'codename' => 'pushover'
 	);
@@ -60,7 +60,7 @@ function pushover_send_new_reply_notification()
 {
 	try
 	{
-		if($GLOBALS['post']['savedraft'] == 1 || pushover_is_forum_blacklisted())
+		if($mybb->input['savedraft'] || pushover_is_forum_blacklisted())
 		{
 			return;
 		}
